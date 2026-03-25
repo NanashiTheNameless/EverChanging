@@ -1,0 +1,103 @@
+name: nightly
+
+permissions:
+  contents: write
+
+on:
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+
+concurrency:
+  group: nightly-release
+  cancel-in-progress: false
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: gather variables
+        id: vars
+        run: |
+          date=$(date -u +'%Y.%m.%d')
+          git_sha7=$(git rev-parse --short=7 HEAD)
+          minecraft_version=$(grep '^minecraft_version=' gradle.properties | cut -d= -f2)
+          echo "date=$date" >> "$GITHUB_OUTPUT"
+          echo "git_sha7=$git_sha7" >> "$GITHUB_OUTPUT"
+          echo "minecraft_version=$minecraft_version" >> "$GITHUB_OUTPUT"
+
+      - name: setup jdk 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+
+      - name: make gradle wrapper executable
+        run: chmod +x ./gradlew
+
+      - name: build
+        run: ./gradlew build --no-daemon
+
+      - name: locate release jar
+        id: locate_jar
+        run: |
+          jar_path=$(find build/libs -maxdepth 1 -type f -name '*.jar' ! -name '*-sources.jar' ! -name '*-dev.jar' | sort | head -n 1)
+          if [ -z "$jar_path" ]; then
+            echo "No release jar found in build/libs" >&2
+            exit 1
+          fi
+          echo "jar_path=$jar_path" >> "$GITHUB_OUTPUT"
+
+      - name: create or update nightly tag
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const ref = 'tags/nightly';
+
+            try {
+              await github.rest.git.getRef({ owner, repo, ref });
+              await github.rest.git.updateRef({
+                owner,
+                repo,
+                ref,
+                sha: context.sha,
+                force: true,
+              });
+            } catch (error) {
+              if (error.status !== 404) {
+                throw error;
+              }
+
+              await github.rest.git.createRef({
+                owner,
+                repo,
+                ref: 'refs/tags/nightly',
+                sha: context.sha,
+              });
+            }
+
+      - name: create or update nightly release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: nightly
+          name: Nightly (${{ steps.vars.outputs.date }})
+          body: |
+            Latest rolling nightly build for Ever Changing.
+
+            Minecraft version: ${{ steps.vars.outputs.minecraft_version }}
+            Source commit: ${{ steps.vars.outputs.git_sha7 }}
+          files: ${{ steps.locate_jar.outputs.jar_path }}
+          overwrite_files: true

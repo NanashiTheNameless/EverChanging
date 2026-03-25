@@ -1,34 +1,34 @@
 {
 	"schemaVersion": 1,
-	"id": "everchanging",
+	"id": "everchanging-nanashi-fork",
 	"version": "${version}",
-	"name": "Ever Changing",
+	"name": "Ever Changing-Nanashi-FORK",
 	"description": "Client-side mod for joining the constantly changing Ngrok tunnels via a GitHub Gist powered by (Engrok - Server side mod)",
 	"authors": [
+		"NanashiTheNameless",
 		"MagicQuartz"
 	],
 	"contact": {
 		"homepage": "https://fabricmc.net/",
-		"sources": "https://github.com/MagicQuartz/EverChanging"
+		"sources": "https://github.com/NanashiTheNameless/EverChanging"
 	},
 	"license": "MIT",
 	"icon": "assets/everchanging/icon.png",
 	"environment": "*",
 	"entrypoints": {
 		"main": [
-			"io.github.magicquartz.everchanging.EverChanging"
+			"io.github.nanashithenameless.everchanging.EverChanging"
 		]
 	},
 	"mixins": [
 		"everchanging.mixins.json"
 	],
 	"depends": {
-		"fabricloader": ">=0.16.5",
-		"minecraft": "~1.21.1",
+		"fabricloader": ">=0.16.10",
+		"minecraft": "~1.21.4",
 		"java": ">=21",
 		"fabric-api": "*"
 	},
 	"suggests": {
-		"another-mod": "*"
 	}
 }
