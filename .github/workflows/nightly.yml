@@ -1,19 +1,17 @@
-name: nightly
+name: Nightly Build
 
 permissions:
   contents: write
 
 on:
-  schedule:
-    - cron: '0 2 * * *'
-  workflow_dispatch:
   push:
     branches:
       - main
       - master
+  workflow_dispatch:
 
 concurrency:
-  group: nightly-release
+  group: nightly
   cancel-in-progress: false
 
 jobs:
@@ -21,12 +19,12 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: checkout repository
-        uses: actions/checkout@v4
+      - name: Check out repository
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
-      - name: gather variables
+      - name: Gather variables
         id: vars
         run: |
           date=$(date -u +'%Y.%m.%d')
@@ -36,20 +34,20 @@ jobs:
           echo "git_sha7=$git_sha7" >> "$GITHUB_OUTPUT"
           echo "minecraft_version=$minecraft_version" >> "$GITHUB_OUTPUT"
 
-      - name: setup jdk 21
-        uses: actions/setup-java@v4
+      - name: Set up Azul Zulu JDK 21
+        uses: actions/setup-java@v5
         with:
-          distribution: temurin
+          distribution: zulu
           java-version: '21'
           cache: gradle
 
-      - name: make gradle wrapper executable
+      - name: Make Gradle wrapper executable
         run: chmod +x ./gradlew
 
-      - name: build
+      - name: Build
         run: ./gradlew build --no-daemon
 
-      - name: locate release jar
+      - name: Locate release jar
         id: locate_jar
         run: |
           jar_path=$(find build/libs -maxdepth 1 -type f -name '*.jar' ! -name '*-sources.jar' ! -name '*-dev.jar' | sort | head -n 1)
@@ -59,8 +57,8 @@ jobs:
           fi
           echo "jar_path=$jar_path" >> "$GITHUB_OUTPUT"
 
-      - name: create or update nightly tag
-        uses: actions/github-script@v7
+      - name: Create or update nightly tag
+        uses: actions/github-script@v8
         with:
           script: |
             const owner = context.repo.owner;
@@ -89,15 +87,72 @@ jobs:
               });
             }
 
-      - name: create or update nightly release
-        uses: softprops/action-gh-release@v2
+      - name: Ensure nightly release exists
+        id: release
+        uses: actions/github-script@v8
         with:
-          tag_name: nightly
-          name: Nightly (${{ steps.vars.outputs.date }})
-          body: |
-            Latest rolling nightly build for Ever Changing.
+          script: |
+            const tag = 'nightly';
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const releaseName = `Nightly (${{ steps.vars.outputs.date }})`;
+            const jarAssetName = `EverChanging-nightly-${{ steps.vars.outputs.minecraft_version }}-${{ steps.vars.outputs.date }}-${{ steps.vars.outputs.git_sha7 }}.jar`;
+            const jarUrl = `https://github.com/${owner}/${repo}/releases/download/${tag}/${jarAssetName}`;
+            const releaseBody = [
+              'Latest rolling nightly build for EverChanging.',
+              '',
+              `Download the latest nightly JAR: [${jarAssetName}](${jarUrl})`,
+              `Source commit: \`${{ steps.vars.outputs.git_sha7 }}\``,
+            ].join('\n');
 
-            Minecraft version: ${{ steps.vars.outputs.minecraft_version }}
-            Source commit: ${{ steps.vars.outputs.git_sha7 }}
-          files: ${{ steps.locate_jar.outputs.jar_path }}
-          overwrite_files: true
+            async function findRelease() {
+              try {
+                return await github.rest.repos.getReleaseByTag({ owner, repo, tag });
+              } catch (error) {
+                if (error.status !== 404) {
+                  throw error;
+                }
+                return null;
+              }
+            }
+
+            let release = await findRelease();
+
+            if (!release) {
+              release = await github.rest.repos.createRelease({
+                owner,
+                repo,
+                tag_name: tag,
+                name: releaseName,
+                draft: false,
+                prerelease: false,
+                body: releaseBody,
+              });
+            } else {
+              release = {
+                data: (await github.rest.repos.updateRelease({
+                  owner,
+                  repo,
+                  release_id: release.data.id,
+                  tag_name: tag,
+                  name: releaseName,
+                  draft: false,
+                  prerelease: false,
+                  body: releaseBody,
+                })).data,
+              };
+            }
+
+            core.setOutput('upload_url', release.data.upload_url);
+            core.setOutput('release_id', release.data.id);
+
+      - name: Publish nightly asset
+        uses: NanashiTheNameless/deploy-nightly@master
+        with:
+          upload_url: ${{ steps.release.outputs.upload_url }}
+          release_id: ${{ steps.release.outputs.release_id }}
+          asset_path: ${{ steps.locate_jar.outputs.jar_path }}
+          asset_name: EverChanging-nightly-${{ steps.vars.outputs.minecraft_version }}-$$.jar
+          asset_content_type: application/java-archive
+          max_releases: 1
+          ignore_hash: false
